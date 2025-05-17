@@ -146,7 +146,7 @@ def get_history(adv: str):
             "ctr": row[3] if row[5] == 'ctr' else None,
             "views": row[5] if row[5] == 'products' else None,
             "insert_date": row[4].strftime("%Y-%m-%d"),
-            "source": row[5]  
+            "source": row[6]  
         })
 
     cursor.close()
