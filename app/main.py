@@ -154,3 +154,42 @@ def get_history(adv: str):
     return {"history": history}
 
 
+@app.get("/test/{metrica}/")
+def test():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if metrica == "adv"
+        query = """
+        SELECT
+            advertiser_id,
+            COUNT(DISTINCT(product_id)),
+        FROM top_ctr
+        WHERE insert_date = CURRENT_DATE
+        GROUP BY advertiser_id
+        """
+    if metrica = "product"
+        query = """
+        SELECT
+            product_id,
+            COUNT(DISTINCT(product_id)),
+        FROM top_ctr
+        WHERE insert_date = CURRENT_DATE
+        GROUP BY product_id
+        """
+
+    cursor.execute(query, (metrica))
+    results = cursor.fetchall()
+
+    test = []
+    for row in results:
+        
+        test.append({
+            "id": row[0],
+            "cantidad": row[1] 
+        })
+
+    cursor.close()
+    conn.close()
+    return {"test": test}
+
