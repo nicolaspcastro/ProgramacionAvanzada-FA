@@ -163,7 +163,7 @@ def test():
         query = """
         SELECT
             advertiser_id,
-            COUNT(DISTINCT(product_id)),
+            COUNT(DISTINCT(product_id))
         FROM top_ctr
         WHERE insert_date = CURRENT_DATE
         GROUP BY advertiser_id
@@ -172,7 +172,7 @@ def test():
         query = """
         SELECT
             product_id,
-            COUNT(DISTINCT(product_id)),
+            COUNT(DISTINCT(product_id))
         FROM top_ctr
         WHERE insert_date = CURRENT_DATE
         GROUP BY product_id
