@@ -1,8 +1,6 @@
 import psycopg2
 import os
 from fastapi import FastAPI
-from typing import List
-from pydantic import BaseModel
 from datetime import date
 
 app = FastAPI()
@@ -75,147 +73,123 @@ def get_recommendations(adv: str, modelo: str):
 
 @app.get("/stats/")
 def get_stats():
+    
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. Cantidad de advertisers distintos
-    query = """
-    SELECT 
-        COUNT(DISTINCT advertiser_id) AS total_advertisers
-    FROM top_ctr;
-    """
-    cursor.execute(query)
-    total_advertisers = cursor.fetchone()[0]
+    try:
+        cursor = connection.cursor()
 
-    # 2. Cantidad de productos con CTR>0, por advertiser
-    query = """
-    SELECT 
-        advertiser_id, 
-        COUNT(DISTINCT product_id) AS prod_ctr_positiva
-    FROM top_ctr
-    WHERE ctr > 0
-    GROUP BY advertiser_id;
-    """
-    cursor.execute(query)
-    ctr_over_zero = cursor.fetchall()
+        query = """
+        SELECT
+            -- 1. Total de advertisers
+            (SELECT 
+                COUNT(DISTINCT advertiser_id) 
+            FROM top_ctr) AS total_advertisers,
 
-    ctr_mayor_cero = []
-    for row in ctr_over_zero:
-        ctr_mayor_cero.append({
-            "advertiser_id": row[0],
-            "cantidad de prod con CTR >0": row[1]
-        })
+            -- 2. Productos con CTR > 0 por advertiser 
+            (
+                SELECT 
+                    json_agg(row_to_json(ctr_mayor_cero))
+                FROM (
+                    SELECT 
+                        advertiser_id, 
+                        COUNT(DISTINCT product_id) AS prod_ctr_positiva
+                    FROM top_ctr
+                    WHERE ctr > 0
+                    GROUP BY advertiser_id
+                ) AS ctr_mayor_cero
+            ) AS prod_ctr_mayor_cero,
 
-    # 3. Top 10 pares [advertiser, producto] con más view
-    query = """
-    SELECT 
-        advertiser_id, 
-        product_id, 
-        SUM(views) AS total_views
-    FROM top_products
-    GROUP BY advertiser_id, product_id
-    ORDER BY total_views DESC
-    LIMIT 10;
-    """
-    cursor.execute(query)
-    top_ten = cursor.fetchall()
+            -- 3. Top 10 productos con más views 
+            (
+                SELECT 
+                    json_agg(row_to_json(top_ten))
+                FROM (
+                    SELECT 
+                        advertiser_id, 
+                        product_id, 
+                        SUM(views) AS total_views
+                    FROM top_products
+                    GROUP BY advertiser_id, product_id
+                    ORDER BY total_views DESC
+                    LIMIT 10
+                ) AS top_ten
+            ) AS top_10_adv_productos,
 
-    cursor.close()
-    conn.close()
+            -- 4. Promedio y máximo CTR por día 
+            (
+                SELECT 
+                    json_agg(row_to_json(mean_max_ctr))
+                FROM (
+                    SELECT 
+                        insert_date,
+                        ROUND(AVG(ctr), 4) AS promedio_ctr,
+                        ROUND(MAX(ctr), 4) AS max_ctr
+                    FROM top_ctr
+                    GROUP BY insert_date
+                    ORDER BY insert_date
+                ) AS mean_max_ctr
+            ) AS max_mean_ctr_por_dia;
+        """
 
-    ranking = []
-    for row in top_ten:
-        ranking.append({
-            "advertiser_id": row[0],
-            "product_id": row[1],
-            "views": row[2]
-        })
+        cursor.execute(query)
+        row = cursor.fetchone()
 
-    # 4. Maximo y Media de CTR por día
-    query = """
-    SELECT 
-        insert_date,
-        ROUND(AVG(ctr), 4) AS promedio_ctr,
-        ROUND(MAX(ctr), 4) AS max_ctr
-    FROM top_ctr
-    GROUP BY insert_date
-    ORDER BY insert_date;
-    """
-    cursor.execute(query)
-    max_mean_ctr = cursor.fetchall()
+        return {
+            "Total Advertisers": row[0],
+            "Q productos con CTR>0": row[1],
+            "Top Ten Adv+prod": row[2],
+            "Mean and Max CTR": row[3]
+        }
 
-    cursor.close()
-    conn.close()
-
-    max_media = []
-    for row in max_mean_ctr:
-        max_media.append({
-            "fecha": row[0],
-            "promedio CTR": row[1],
-            "maximo CTR": row[2]
-        })
-
-
-    return {
-        "Total Advertisers": total_advertisers,
-        "Q productos con CTR>0": ctr_mayor_cero,
-        "Top Ten Adv+prod": ranking,
-        "Mean and Max CTR": max_media
-    }
+    finally:
+        cursor.close()
+        connection.close()
 
 
 
 @app.get("/history/{adv}/")
 def get_history(adv: str):
+    
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. Recomendaciones top_ctr
     query = """
     SELECT 
-        insert_date,
-        product_id,
-        ctr 
-    FROM top_ctr
-    WHERE advertiser_id = %s 
-        AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
-    ORDER BY insert_date
-    """
-    cursor.execute(query, (adv,))
-    results_ctr = cursor.fetchall()
+        -- 1. Datos de top_ctr (últimos 7 días)
+        (
+            SELECT 
+                json_agg(row_to_json(l7_top_ctr))
+            FROM (
+                SELECT 
+                    insert_date, 
+                    product_id
+                FROM top_ctr
+                WHERE advertiser_id = %s 
+                    AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
+                ORDER BY insert_date
+            ) AS l7_top_ctr
+        ) AS top_ctr,
 
-    recommendations_ctr = []
-    for row in results_ctr:
-        recommendations_ctr.append({
-            "fecha": row[0].isoformat(),
-            "product_id": row[1]
-        })
-    
-    cursor.close()
-    conn.close()
-
-    # 2. Recomendaciones top_products
-
-    query = """
-    SELECT 
-        insert_date,
-        product_id,
-        views
-    FROM top_products
-    WHERE advertiser_id = %s 
-        AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
-    ORDER BY insert_date
+        -- 2. Datos de top_products (últimos 7 días)
+        (
+            SELECT 
+                json_agg(row_to_json(l7_top_products))
+            FROM (
+                SELECT 
+                    insert_date, 
+                    product_id
+                FROM top_products
+                WHERE advertiser_id = %s 
+                    AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
+                ORDER BY insert_date
+            ) AS l7_top_products
+        ) AS top_products
     """
 
-    cursor.execute(query, (adv,))
-    results_products = cursor.fetchall()
-
-    recommendations_products = []
-    for row in results_products:
-        recommendations_products.append({
-            "fecha": row[0].isoformat(),
-            "product_id": row[1]
-        })
+    cursor.execute(query, (adv, adv))
+    row = cursor.fetchone()
 
     cursor.close()
     conn.close()
@@ -223,10 +197,11 @@ def get_history(adv: str):
     return {
         "Recomendaciones para": {
             "Advertiser": adv,
-            "top_ctr": recommendations_ctr,
-            "top_products": recommendations_products
+            "top_ctr": row[0] if row[0] is not None else [],
+            "top_products": row[1] if row[1] is not None else []
         }
     }
+
 
 
 @app.get("/test/{metrica}/")
