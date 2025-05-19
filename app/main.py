@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from typing import List
 from pydantic import BaseModel
-import datetime
+from datetime import date
 
 app = FastAPI()
 
@@ -23,7 +23,7 @@ def get_connection():
 
 @app.get("/")
 def root():
-    return {"fast_api":"Castro-Delgado-Maximo",
+    return {"Fast_Api":"Castro-Delgado-Maximo",
             "status": "OK"}
 
 
@@ -34,13 +34,17 @@ def get_recommendations(adv: str, modelo: str):
 
     if modelo == "top_ctr":  
         query = """
-        SELECT product_id, click, impression, ctr 
+        SELECT 
+            product_id,
+            ctr 
         FROM top_ctr
         WHERE advertiser_id = %s AND insert_date = CURRENT_DATE
         """
     elif modelo == "top_products":  
         query = """
-        SELECT product_id, views
+        SELECT 
+            product_id, 
+            views
         FROM top_products
         WHERE advertiser_id = %s AND insert_date = CURRENT_DATE
         """
@@ -52,76 +56,111 @@ def get_recommendations(adv: str, modelo: str):
 
     recommendations = []
     for row in results:
-        if modelo == "top_ctr":
-            recommendations.append({
-                "product_id": row[0],
-                "click": row[1],
-                "impression": row[2],
-                "ctr": row[3]
-            })
-        elif modelo == "top_products":
-            recommendations.append({
-                "product_id": row[0],
-                "views": row[1]
-            })
+        recommendations.append({
+            "product_id": row[0],
+        })
+
+    fecha = date.today().isoformat()
 
     cursor.close()
     conn.close()
-    return {"recommendations": recommendations}
+    return {
+        "Recomendaciones para": {
+            "Advertiser": adv,
+            "Fecha": fecha,
+            "Modelo": modelo,
+            "Productos Recomendados": recommendations
+        }
+    }
 
 @app.get("/stats/")
 def get_stats():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Cantidad de advertisers 
+    # 1. Cantidad de advertisers distintos
     query = """
-    SELECT COUNT(DISTINCT advertiser_id) 
-    FROM (
-        SELECT advertiser_id FROM top_ctr
-        UNION
-        SELECT advertiser_id FROM top_products
-    ) AS all_advertisers
+    SELECT 
+        COUNT(DISTINCT advertiser_id) AS total_advertisers
+    FROM top_ctr;
     """
     cursor.execute(query)
     total_advertisers = cursor.fetchone()[0]
 
-    # Variación de Recomendaciones
+    # 2. Cantidad de productos con CTR>0, por advertiser
     query = """
-    SELECT advertiser_id, COUNT(DISTINCT t.insert_date) AS var_count
-    FROM (
-        SELECT advertiser_id, insert_date FROM top_ctr
-        UNION ALL
-        SELECT advertiser_id, insert_date FROM top_products
-    ) AS t
-    GROUP BY advertiser_id
-    ORDER BY var_count DESC
-    LIMIT 10
+    SELECT 
+        advertiser_id, 
+        COUNT(DISTINCT product_id) AS prod_ctr_positiva
+    FROM top_ctr
+    WHERE ctr > 0
+    GROUP BY advertiser_id;
     """
     cursor.execute(query)
-    advertisers_variations = cursor.fetchall()
+    ctr_over_zero = cursor.fetchall()
 
-    # Coincidencia Modelos
+    ctr_mayor_cero = []
+    for row in ctr_over_zero:
+        ctr_mayor_cero.append({
+            "advertiser_id": row[0],
+            "cantidad de prod con CTR >0": row[1]
+        })
+
+    # 3. Top 10 pares [advertiser, producto] con más view
     query = """
-    SELECT t.advertiser_id, COUNT(DISTINCT t.model) AS model_count
-    FROM (
-        SELECT advertiser_id, 'ctr' AS model FROM top_ctr
-        UNION ALL
-        SELECT advertiser_id, 'products' AS model FROM top_products
-    ) AS t
-    GROUP BY t.advertiser_id
-    HAVING COUNT(DISTINCT t.model) > 1
+    SELECT 
+        advertiser_id, 
+        product_id, 
+        SUM(views) AS total_views
+    FROM top_products
+    GROUP BY advertiser_id, product_id
+    ORDER BY total_views DESC
+    LIMIT 10;
     """
     cursor.execute(query)
-    model_matches = cursor.fetchall()
+    top_ten = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
+    ranking = []
+    for row in top_ten:
+        ranking.append({
+            "advertiser_id": row[0],
+            "product_id": row[1],
+            "views": row[2]
+        })
+
+    # 4. Maximo y Media de CTR por día
+    query = """
+    SELECT 
+        insert_date,
+        ROUND(AVG(ctr), 4) AS promedio_ctr,
+        ROUND(MAX(ctr), 4) AS max_ctr
+    FROM top_ctr
+    GROUP BY insert_date
+    ORDER BY insert_date;
+    """
+    cursor.execute(query)
+    max_mean_ctr = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    max_media = []
+    for row in max_mean_ctr:
+        max_media.append({
+            "fecha": row[0],
+            "promedio CTR": row[1],
+            "maximo CTR": row[2]
+        })
+
+
     return {
-        "total_advertisers": total_advertisers,
-        "advertisers_variations": advertisers_variations,
-        "model_matches": model_matches
+        "Total Advertisers": total_advertisers,
+        "Q productos con CTR>0": ctr_mayor_cero,
+        "Top Ten Adv+prod": ranking,
+        "Mean and Max CTR": max_media
     }
 
 
@@ -131,36 +170,63 @@ def get_history(adv: str):
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Recomendaciones últimos 7 días 
+    # 1. Recomendaciones top_ctr
     query = """
-    SELECT product_id, click, impression, ctr, insert_date, NULL AS views, 'ctr' AS source
+    SELECT 
+        insert_date,
+        product_id,
+        ctr 
     FROM top_ctr
-    WHERE advertiser_id = %s AND insert_date >= CURRENT_DATE - INTERVAL '7 days'
-    UNION ALL
-    SELECT product_id, NULL AS click, NULL AS impression, NULL AS ctr, insert_date, views, 'products' AS source
-    FROM top_products
-    WHERE advertiser_id = %s AND insert_date >= CURRENT_DATE - INTERVAL '7 days'
+    WHERE advertiser_id = %s 
+        AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
+    ORDER BY insert_date
     """
-    
-    cursor.execute(query, (adv, adv))
-    results = cursor.fetchall()
+    cursor.execute(query, (adv,))
+    results_ctr = cursor.fetchall()
 
-    history = []
-    for row in results:
-        
-        history.append({
-            "product_id": row[0],
-            "click": row[1] if row[5] == 'ctr' else None,
-            "impression": row[2] if row[5] == 'ctr' else None,
-            "ctr": row[3] if row[5] == 'ctr' else None,
-            "views": row[5] if row[5] == 'products' else None,
-            "insert_date": row[4].strftime("%Y-%m-%d"),
-            "source": row[6]  
+    recommendations_ctr = []
+    for row in results_ctr:
+        recommendations_ctr.append({
+            "fecha": row[0].isoformat(),
+            "product_id": row[1]
+        })
+    
+    cursor.close()
+    conn.close()
+
+    # 2. Recomendaciones top_products
+
+    query = """
+    SELECT 
+        insert_date,
+        product_id,
+        views
+    FROM top_products
+    WHERE advertiser_id = %s 
+        AND insert_date >= CURRENT_DATE - INTERVAL '6 days'
+    ORDER BY insert_date
+    """
+
+    cursor.execute(query, (adv,))
+    results_products = cursor.fetchall()
+
+    recommendations_products = []
+    for row in results_products:
+        recommendations_products.append({
+            "fecha": row[0].isoformat(),
+            "product_id": row[1]
         })
 
     cursor.close()
     conn.close()
-    return {"history": history}
+
+    return {
+        "Recomendaciones para": {
+            "Advertiser": adv,
+            "top_ctr": recommendations_ctr,
+            "top_products": recommendations_products
+        }
+    }
 
 
 @app.get("/test/{metrica}/")
