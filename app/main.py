@@ -7,6 +7,7 @@ import datetime
 
 app = FastAPI()
 
+
 # Conexión db
 def get_connection():
     return psycopg2.connect(
@@ -16,6 +17,14 @@ def get_connection():
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT", 5432)
     )
+
+# pantalla inicio
+
+
+@app.get("/")
+def root():
+    return {"fast_api":"Castro-Delgado-Maximo",
+            "status": "OK"}
 
 
 @app.get("/recommendations/{adv}/{modelo}")
