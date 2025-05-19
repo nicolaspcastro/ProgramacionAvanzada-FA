@@ -177,7 +177,7 @@ def test():
         WHERE insert_date = CURRENT_DATE
         GROUP BY advertiser_id
         """
-    if metrica = "product"
+    if metrica == "product"
         query = """
         SELECT
             product_id,
