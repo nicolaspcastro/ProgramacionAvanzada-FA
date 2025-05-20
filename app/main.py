@@ -133,10 +133,6 @@ def get_stats():
     cursor.execute(query)
     row = cursor.fetchone()
 
-    cursor.close()
-    conn.close()
-
-    
     return {
         "Total Advertisers": row[0],
         "Q productos con CTR>0": row[1],
@@ -144,6 +140,8 @@ def get_stats():
         "Mean and Max CTR": row[3]
     }
 
+    cursor.close()
+    conn.close()
 
 
 @app.get("/history/{adv}/")
