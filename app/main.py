@@ -77,75 +77,72 @@ def get_stats():
     conn = get_connection()
     cursor = conn.cursor()
 
-    try:
-        cursor = connection.cursor()
+    query = """
+    SELECT
+        -- 1. Total de advertisers
+        (SELECT 
+            COUNT(DISTINCT advertiser_id) 
+        FROM top_ctr) AS total_advertisers,
 
-        query = """
-        SELECT
-            -- 1. Total de advertisers
-            (SELECT 
-                COUNT(DISTINCT advertiser_id) 
-            FROM top_ctr) AS total_advertisers,
-
-            -- 2. Productos con CTR > 0 por advertiser 
-            (
+        -- 2. Productos con CTR > 0 por advertiser 
+        (
+            SELECT 
+                json_agg(row_to_json(ctr_mayor_cero))
+            FROM (
                 SELECT 
-                    json_agg(row_to_json(ctr_mayor_cero))
-                FROM (
-                    SELECT 
-                        advertiser_id, 
-                        COUNT(DISTINCT product_id) AS prod_ctr_positiva
-                    FROM top_ctr
-                    WHERE ctr > 0
-                    GROUP BY advertiser_id
-                ) AS ctr_mayor_cero
-            ) AS prod_ctr_mayor_cero,
+                    advertiser_id, 
+                    COUNT(DISTINCT product_id) AS prod_ctr_positiva
+                FROM top_ctr
+                WHERE ctr > 0
+                GROUP BY advertiser_id
+            ) AS ctr_mayor_cero
+        ) AS prod_ctr_mayor_cero,
 
-            -- 3. Top 10 productos con más views 
-            (
+        -- 3. Top 10 productos con más views 
+        (
+            SELECT 
+                json_agg(row_to_json(top_ten))
+            FROM (
                 SELECT 
-                    json_agg(row_to_json(top_ten))
-                FROM (
-                    SELECT 
-                        advertiser_id, 
-                        product_id, 
-                        SUM(views) AS total_views
-                    FROM top_products
-                    GROUP BY advertiser_id, product_id
-                    ORDER BY total_views DESC
-                    LIMIT 10
-                ) AS top_ten
-            ) AS top_10_adv_productos,
+                    advertiser_id, 
+                    product_id, 
+                    SUM(views) AS total_views
+                FROM top_products
+                GROUP BY advertiser_id, product_id
+                ORDER BY total_views DESC
+                LIMIT 10
+            ) AS top_ten
+        ) AS top_10_adv_productos,
 
-            -- 4. Promedio y máximo CTR por día 
-            (
+        -- 4. Promedio y máximo CTR por día 
+        (
+            SELECT 
+                json_agg(row_to_json(mean_max_ctr))
+            FROM (
                 SELECT 
-                    json_agg(row_to_json(mean_max_ctr))
-                FROM (
-                    SELECT 
-                        insert_date,
-                        ROUND(AVG(ctr), 4) AS promedio_ctr,
-                        ROUND(MAX(ctr), 4) AS max_ctr
-                    FROM top_ctr
-                    GROUP BY insert_date
-                    ORDER BY insert_date
-                ) AS mean_max_ctr
-            ) AS max_mean_ctr_por_dia;
-        """
+                    insert_date,
+                    ROUND(AVG(ctr), 4) AS promedio_ctr,
+                    ROUND(MAX(ctr), 4) AS max_ctr
+                FROM top_ctr
+                GROUP BY insert_date
+                ORDER BY insert_date
+            ) AS mean_max_ctr
+        ) AS max_mean_ctr_por_dia;
+    """
 
-        cursor.execute(query)
-        row = cursor.fetchone()
+    cursor.execute(query)
+    row = cursor.fetchone()
 
-        return {
-            "Total Advertisers": row[0],
-            "Q productos con CTR>0": row[1],
-            "Top Ten Adv+prod": row[2],
-            "Mean and Max CTR": row[3]
-        }
+    cursor.close()
+    conn.close()
 
-    finally:
-        cursor.close()
-        connection.close()
+    
+    return {
+        "Total Advertisers": row[0],
+        "Q productos con CTR>0": row[1],
+        "Top Ten Adv+prod": row[2],
+        "Mean and Max CTR": row[3]
+    }
 
 
 
