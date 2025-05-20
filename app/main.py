@@ -123,8 +123,8 @@ def get_stats():
                 FROM (
                     SELECT 
                         insert_date,
-                        ROUND(AVG(ctr), 4) AS promedio_ctr,
-                        ROUND(MAX(ctr), 4) AS max_ctr
+                        ROUND(AVG(ctr)::numeric, 4) AS promedio_ctr,
+                        ROUND(MAX(ctr)::numeric, 4) AS max_ctr
                     FROM top_ctr
                     GROUP BY insert_date
                     ORDER BY insert_date
